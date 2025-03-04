@@ -15,14 +15,14 @@
 ###          checked.
 ###
 ###          For SPOT tags we check the following:
-###          Battery voltage over time (-Status.csv, column; BattVoltage)
-###          Transmission attempts over time (-Status.csv, column; Transmits)
-###          Temperature at time of status message (-Status.csv, column; Temperature)
-###          WetDry information: current, dailymin and dailymax (-Status.csv, columns; WetDry, MinWetDry, MaxWetDry)
-###          Best Rx level (-Argos.csv, column; Power)
-###          Corrupted vs uncorrupted receptions (-Argos.csv, column; Corrupt)
-###          Queued data summaries (-Status.csv, column; Xmit Queue)
-###          Fastloc Success vs. Failure (not yet implemented)
+###          Battery voltage over time (-Status.csv, column; BattVoltage) - done
+###          Transmission attempts over time (-Status.csv, column; Transmits) - done, double check with WC why outliers in 264015 email
+###          Temperature at time of status message (-Status.csv, column; Temperature) - done
+###          WetDry information: current, dailymin and dailymax (-Status.csv, columns; WetDry, MinWetDry, MaxWetDry) - done
+###          Best Rx level (-All.csv, column; Best level) - done
+###          Corrupted vs uncorrupted receptions (-Argos.csv, column; Corrupt) - TBD
+###          Queued data summaries (-Status.csv, column; Xmit Queue) - done
+###          Fastloc Success vs. Failure (not yet implemented) - TBD
 ###
 ### Please see TODO list at end of script for open issues.
 ### ....................................................................................................
@@ -40,13 +40,13 @@ rm(list = ls())
 ## if first time
 # install.packages("tidyverse")
 # install.packages("magrittr")
-# install.packages("patchwork")
+# install.packages("lubridate")
 # install.packages("ggplot2")
 
 ## load packages
 library(tidyverse)
 library(magrittr)
-library(patchwork)
+library(lubridate)
 library(ggplot2)
 
 # A3: Specify dataloc and saveloc ----
@@ -67,25 +67,117 @@ options(timeout = 3000) # manually increase time out threshold (needed when down
 # B1: Import data ----
 
 ## Status data
-spotdata <- list.files(path = spotloc,
-                       pattern = paste0("\\-Status.csv"),
-                       recursive = TRUE,
-                       full.names = TRUE ) %>%
-  purrr::map_dfr(~read_csv(.x) %>%
-                   mutate(DeployID = as.character(DeployID),
-                          LocationQuality = as.character(LocationQuality)))
-### TODO have to adjust all columns so they are the same across
-### DEAL WITH warnings()
+all_status = dir(spotloc, recursive=T, full.names=T, pattern="\\-Status.csv$") # import files in folders in path directory all at once
+mystatus = lapply(all_status, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+mystatus <- do.call("rbind.fill",mystatus) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
 
+## For the fun of it, here is a way to import all dataframes as one using the purrr package
+# spotdata <- list.files(path = spotloc,
+#                        pattern = paste0("\\-Status.csv"),
+#                        recursive = TRUE,
+#                        full.names = TRUE ) %>%
+#   purrr::map_dfr(~read_csv(.x) %>%
+#                    mutate(DeployID = as.character(DeployID),
+#                           LocationQuality = as.character(LocationQuality))) ### DEAL WITH warnings()
+
+
+## Argos data
+# all_argos = dir(spotloc, recursive=T, full.names=T, pattern="\\-Argos.csv$") # import files in folders in path directory all at once
+# myargos = lapply(all_argos, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+# myargos <- do.call("rbind.fill",myargos) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
+
+## All data
+all_all = dir(spotloc, recursive=T, full.names=T, pattern="\\-All.csv$") # import files in folders in path directory all at once
+myall = lapply(all_all, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+myall <- do.call("rbind.fill",myall) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
 
 ### ....................................................................................................
 ### [C] Data housekeeping and preparation ----
 ### ....................................................................................................
 
+# C1: Status info - keep necessary columns ----
+
+## We need
+## Ptt info
+## Datetime info
+## Battery voltage over time - column; BattVoltage
+## Transmission attempts over time - column; Transmits
+## Temperature at time of status message - column; Temperature
+## WetDry information: current, dailymin and dailymax - columns; WetDry, MinWetDry, MaxWetDry
+
+status <- mystatus %>%
+  dplyr::mutate(
+    Ptt = as.character(Ptt),
+    DatetimeUTC = as.POSIXct(Received,format="%H:%M:%S %d-%b-%Y", tz="UTC", usetz = T),
+    DatetimeEST = lubridate::with_tz(DatetimeUTC, tzone = "US/Eastern"),
+    Date_local = format(DatetimeEST, "%d-%b-%y"),
+    Transmits = as.numeric(Transmits),
+    WetDry = as.numeric(WetDry),
+    MinWetDry = as.numeric(MinWetDry),
+    MaxWetDry = as.numeric(MaxWetDry)
+  ) %>%
+  dplyr::select(
+    Ptt,
+    DatetimeUTC,
+    DatetimeEST,
+    Date_local,
+    BattVoltage,
+    Transmits,
+    Temperature,
+    WetDry,
+    MinWetDry,
+    MaxWetDry
+  )
+
+
+# C2: Argos info - keep necessary columns ----
+
+## We need
+## Ptt info
+## Datetime info
+## Best Rx level - column; Power
+## Corrupted vs uncorrupted receptions - column; Corrupt
+
+# argos <- myargos %>%
+#   dplyr::mutate(
+#     Ptt = as.character(Ptt),
+#     DatetimeUTC = as.POSIXct(Date,format="%H:%M:%S %d-%b-%Y", tz="UTC", usetz = T),
+#     DatetimeEST = lubridate::with_tz(DatetimeUTC, tzone = "US/Eastern"),
+#     Date_local = format(DatetimeEST, "%d-%b-%y"),
+#     Power = as.numeric(Power),
+#   ) %>%
+#   dplyr::select(
+#     # select needed columns only
+#   )
+
+# C3: All info - keep necessary columns ----
+
+## We need
+## Ptt info
+## Datetime info
+## Best Rx level - column; Best level
+
+
+all <- myall %>%
+  dplyr::mutate(
+    Ptt = as.character(Platform.ID.No.),
+    DatetimeUTC = as.POSIXct(Loc..date,format="%m/%d/%Y %H:%M:%S", tz="UTC", usetz = T),
+    DatetimeEST = lubridate::with_tz(DatetimeUTC, tzone = "US/Eastern"),
+    Date_local = format(DatetimeEST, "%d-%b-%y"),
+    BestRx = as.numeric(Best.level),
+  ) %>%
+  dplyr::select(
+    Ptt,
+    DatetimeUTC,
+    DatetimeEST,
+    Date_local,
+    BestRx
+  )
 
 ### ....................................................................................................
-### [D] Plot animated data with fixed plot window for individual animals ----
+### [D] Plot diagnostic plots ----
 ### ....................................................................................................
+
 
 
 ### ....................................................................................................
@@ -96,4 +188,6 @@ spotdata <- list.files(path = spotloc,
 # END OF SCRIPT ----
 #### TODO LIST ####
 # TODO1: ----
-# add location of data per csv file in descripiton box
+# check with WC where which diagnostic variable is taken from
+# implement diagnostics for Corrupted and uncorrupted plot, queued data summaries
+# check with Devon WC why transmit attempts has outliers in 264015
