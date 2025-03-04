@@ -41,12 +41,14 @@ rm(list = ls())
 # install.packages("tidyverse")
 # install.packages("magrittr")
 # install.packages("lubridate")
+# install.packages("plyr")
 # install.packages("ggplot2")
 
 ## load packages
 library(tidyverse)
 library(magrittr)
 library(lubridate)
+library(plyr)
 library(ggplot2)
 
 # A3: Specify dataloc and saveloc ----
@@ -178,6 +180,55 @@ all <- myall %>%
 ### [D] Plot diagnostic plots ----
 ### ....................................................................................................
 
+# D0: prepare loop (not yet ready)
+
+status_i <- status %>%
+  dplyr::filter(
+    Ptt == "264015"
+  ) %>%
+  dplyr::mutate(
+    Index = row_number()
+  )
+
+par(mar = c(2.85,3.1,2,0.85), mgp = c(1.95, 0.6,0))
+
+# D1: Battery voltage plot ----
+
+## Plot
+plot(status_i$DatetimeEST, status_i$BattVoltage,
+     pch = 21,
+     bg = alpha(ifelse(status_i$BattVoltage >= 3.2, "blue", "red"),0.75),
+     col = "black",
+     xaxt = "n", # remove x axis labels
+     cex.axis = .7,
+     las = 1,
+     xlab = expression(bold("Date")),
+     ylab = expression(bold("Voltage [V]")))
+
+points(centroids2, col = "black", pch = 10, cex = 2, lwd = 4)
+
+## label the axes
+### X-axis
+# mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
+axis(1, at = c(min(status_i$DatetimeEST), max(status_i$DatetimeEST)),
+     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)], status_i$Date_local[which.max(status_i$DatetimeEST)]),
+     cex.axis = 0.7,
+     tck = -0.035,
+     las = 1)
+##TODO add a lable where votlage drops below 3.2V
+
+## add a legend
+legend("bottomleft",
+       legend = c(expression(paste("\u2265", " 3.2 V")),  # ≥ symbol
+                  # expression(paste("\u2264", " 3.2 V"))),  # ≤ symbol
+                  expression(paste("<", " 3.2 V"))),
+       pch = 21,
+       pt.bg = c("blue","red"),
+       horiz = T,
+       cex = 1, bty = "n")
+
+## label the plot
+title(main = expression(bold("Battery Voltage")))
 
 
 ### ....................................................................................................
