@@ -70,7 +70,7 @@ options(timeout = 3000) # manually increase time out threshold (needed when down
 
 ## Status data
 all_status = dir(spotloc, recursive=T, full.names=T, pattern="\\-Status.csv$") # import files in folders in path directory all at once
-mystatus = lapply(all_status, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+mystatus = lapply(all_status, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T)
 mystatus <- do.call("rbind.fill",mystatus) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
 
 ## For the fun of it, here is a way to import all dataframes as one using the purrr package
@@ -85,12 +85,12 @@ mystatus <- do.call("rbind.fill",mystatus) #rbind.fill() is a dplyr function tha
 
 ## Argos data
 # all_argos = dir(spotloc, recursive=T, full.names=T, pattern="\\-Argos.csv$") # import files in folders in path directory all at once
-# myargos = lapply(all_argos, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+# myargos = lapply(all_argos, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T)
 # myargos <- do.call("rbind.fill",myargos) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
 
 ## All data
 all_all = dir(spotloc, recursive=T, full.names=T, pattern="\\-All.csv$") # import files in folders in path directory all at once
-myall = lapply(all_all, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T) # import all .csv files containing TAT-Hiso data, but skip header lines
+myall = lapply(all_all, read.csv,sep=",",dec=".",stringsAsFactor=F,header=T)
 myall <- do.call("rbind.fill",myall) #rbind.fill() is a dplyr function that drops columnnames as we have dfs with different colnames
 
 ### ....................................................................................................
@@ -112,8 +112,10 @@ status <- mystatus %>%
     Ptt = as.character(Ptt),
     DatetimeUTC = as.POSIXct(Received,format="%H:%M:%S %d-%b-%Y", tz="UTC", usetz = T),
     DatetimeEST = lubridate::with_tz(DatetimeUTC, tzone = "US/Eastern"),
+    DateEST = as.Date(DatetimeEST),
     Date_local = format(DatetimeEST, "%d-%b-%y"),
     Transmits = as.numeric(Transmits),
+    Temperature = if_else(Temperature < -5 | Temperature > 50, NA, Temperature), # Temperature readings below 0 or above 50 dont make no sense
     WetDry = as.numeric(WetDry),
     MinWetDry = as.numeric(MinWetDry),
     MaxWetDry = as.numeric(MaxWetDry)
@@ -122,6 +124,7 @@ status <- mystatus %>%
     Ptt,
     DatetimeUTC,
     DatetimeEST,
+    DateEST,
     Date_local,
     BattVoltage,
     Transmits,
@@ -165,6 +168,7 @@ all <- myall %>%
     Ptt = as.character(Platform.ID.No.),
     DatetimeUTC = as.POSIXct(Loc..date,format="%m/%d/%Y %H:%M:%S", tz="UTC", usetz = T),
     DatetimeEST = lubridate::with_tz(DatetimeUTC, tzone = "US/Eastern"),
+    DateEST = as.Date(DatetimeEST),
     Date_local = format(DatetimeEST, "%d-%b-%y"),
     BestRx = as.numeric(Best.level),
   ) %>%
@@ -172,6 +176,7 @@ all <- myall %>%
     Ptt,
     DatetimeUTC,
     DatetimeEST,
+    DateEST,
     Date_local,
     BestRx
   )
@@ -182,15 +187,31 @@ all <- myall %>%
 
 # D0: prepare loop (not yet ready)
 
-status_i <- status %>%
-  dplyr::filter(
-    Ptt == "264015"
-  ) %>%
-  dplyr::mutate(
-    Index = row_number()
-  )
+## create a list with all IDs
+fishlist <- unique(status$Ptt)
 
-par(mar = c(2.85,3.1,2,0.85), mgp = c(1.95, 0.6,0))
+for (i in fishlist){
+  ## subset the dfs
+  # i <- 264015
+  status_i <- status[which(status$Ptt == i),]
+  all_i <- all[which(all$Ptt == i),]
+
+  ## open plotting window
+  png(filename = paste0(saveloc, "/SPOT_output/Deployment_diagnostics_Ptt_",i,"_", today(),".png"), width = 297, height = 210, units = "mm", bg = "white", res = 150, family = "", type = "cairo-png")
+
+  ## define plot window parameters
+  par(mar = c(2.85,3.1,2,0.85), mgp = c(1.95, 0.6,0),
+      oma = c(0, 0, 3, 0))  # Outer margins for the overall title
+
+  ## setup multipanel layout - this is for 5 plots and might need to be adjusted
+  layout(matrix(c(1,1, # first plot (covers top spaces 1-2)
+                  2,2, # second plot (covers top spaces 3-4)
+                  3,3, # third plot (covers top spaces 5-6)
+                  0, # blank (covers bottom space 1 (0 = blank plot)
+                  4,4,# fourth plot (covers bottom spaces 2-3)
+                  5,5, # 5th plot (covers bottom spaces 4-5)
+                  0), # blank (covers bottom space 6)
+                nrow = 2, byrow = TRUE))
 
 # D1: Battery voltage plot ----
 
@@ -200,22 +221,19 @@ plot(status_i$DatetimeEST, status_i$BattVoltage,
      bg = alpha(ifelse(status_i$BattVoltage >= 3.2, "blue", "red"),0.75),
      col = "black",
      xaxt = "n", # remove x axis labels
-     cex.axis = .7,
+     cex.axis = .9,
      las = 1,
      xlab = expression(bold("Date")),
      ylab = expression(bold("Voltage [V]")))
 
-points(centroids2, col = "black", pch = 10, cex = 2, lwd = 4)
-
 ## label the axes
 ### X-axis
 # mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
-axis(1, at = c(min(status_i$DatetimeEST), max(status_i$DatetimeEST)),
-     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)], status_i$Date_local[which.max(status_i$DatetimeEST)]),
-     cex.axis = 0.7,
-     tck = -0.035,
+axis(1, at = c(min(status_i$DatetimeEST), status_i$DatetimeEST[which(status_i$BattVoltage < 3.2)[1]], max(status_i$DatetimeEST)),
+     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)], status_i$Date_local[which(status_i$BattVoltage < 3.2)[1]], status_i$Date_local[which.max(status_i$DatetimeEST)]),
+     cex.axis = 0.9,
+     tck = -0.025,
      las = 1)
-##TODO add a lable where votlage drops below 3.2V
 
 ## add a legend
 legend("bottomleft",
@@ -225,15 +243,171 @@ legend("bottomleft",
        pch = 21,
        pt.bg = c("blue","red"),
        horiz = T,
-       cex = 1, bty = "n")
+       cex = 1.1, bty = "n")
 
 ## label the plot
-title(main = expression(bold("Battery Voltage")))
+title(main = expression(bold("Battery Voltage ")))
+
+# D2: Transmission attempts plot ----
+
+## Plot
+plot(status_i$DatetimeEST, status_i$Transmits,
+     pch = 21,
+     bg = alpha("blue",0.75),
+     col = "black",
+     xaxt = "n", # remove x axis labels
+     cex.axis = .9,
+     las = 1,
+     xlab = expression(bold("Date")),
+     ylab = expression(bold("# Transmits")))
+
+## label the axes
+### X-axis
+# mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
+axis(1, at = c(min(status_i$DatetimeEST), max(status_i$DatetimeEST)),
+     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)], status_i$Date_local[which.max(status_i$DatetimeEST)]),
+     cex.axis = 0.9,
+     tck = -0.025,
+     las = 1)
+
+## add a legend
+###NA
+
+## as this is the center plot in the upper row we add main title for multipanel figure here
+## Last step: add overall title to multipanel figure
+mtext(bquote(bold(paste("Deployment diagnostics for Ptt ID ", .(i)))), line = 2.5)
+
+## label the plot
+title(main = expression(bold("Transmit Attempts ")))
+
+# D3: Temp at time of status message plot ----
+
+## Plot
+plot(status_i$DatetimeEST, status_i$Temperature,
+     pch = 21,
+     bg = alpha("blue",0.75),
+     col = "black",
+     xaxt = "n", # remove x axis labels
+     cex.axis = .9,
+     las = 1,
+     xlab = expression(bold("Date")),
+     ylab = expression(bold("Temperature [°C]")))
+
+## label the axes
+### X-axis
+# mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
+axis(1, at = c(min(status_i$DatetimeEST), max(status_i$DatetimeEST)),
+     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)],  status_i$Date_local[which.max(status_i$DatetimeEST)]),
+     cex.axis = 0.9,
+     tck = -0.025,
+     las = 1)
+
+## add a legend
+### NA
+
+## label the plot
+title(main = expression(bold("Temperature at time of status message")))
+
+# D4: WetDry patterns plot----
+
+## Plot WetDry values
+plot(status_i$DatetimeEST, status_i$WetDry,
+     # ylim = c(0,max(status_i$WetDry+10, na.rm = T)),
+     ylim = c(0,255),
+     pch = 3,
+     lwd = 2,
+     # bg = alpha(ifelse(status_i$BattVoltage >= 3.2, "blue", "red"),0.75),
+     col = "forestgreen",
+     xaxt = "n", # remove x axis labels
+     cex.axis = .9,
+     las = 1,
+     xlab = expression(bold("Date")),
+     ylab = expression(bold("WetDry")))
+
+## add minimum values
+points(status_i$DatetimeEST, status_i$MinWetDry,
+       pch = 25, bg = "blue", col = "black")
+
+## add maximum values
+points(status_i$DatetimeEST, status_i$MaxWetDry,
+       pch = 24, bg = "goldenrod", col = "black")
+
+## label the axes
+### X-axis
+# mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
+axis(1, at = c(min(status_i$DatetimeEST), max(status_i$DatetimeEST)),
+     labels = c(status_i$Date_local[which.min(status_i$DatetimeEST)], status_i$Date_local[which.max(status_i$DatetimeEST)]),
+     cex.axis = 0.9,
+     tck = -0.025,
+     las = 1)
+
+## add a legend
+legend("bottomright",
+       legend = c(expression(paste("Current")),
+                  expression(paste("DailyMin")),
+                  expression(paste("DailyMax"))),
+       pch = c(3,25,24),
+       pt.bg = c("forestgreen", "blue","goldenrod"),
+       col = c("forestgreen", "black", "black"),
+       pt.lwd = c(2,1,1),
+       horiz = T,
+       cex = 1.1, bty = "n")
+
+## label the plot
+title(main = expression(bold("WetDry Patterns")))
+
+# D5: Best Rx Level plot ----
+
+## Plot db of Signal values
+plot(all_i$DateEST, all_i$BestRx,
+     # ylim = c(0,max(status_i$WetDry+10, na.rm = T)),
+     pch = 21,
+     bg = alpha("blue", 0.75),
+     col = "black",
+     xaxt = "n", # remove x axis labels
+     cex.axis = .9,
+     las = 1,
+     xlab = expression(bold("Date")),
+     ylab = expression(bold("dB of signal")))
+
+## add average
+daily_avg <- all_i %>% # calculate mean first
+  dplyr::group_by(DateEST) %>%
+  dplyr::summarise(dailymean = mean(BestRx))
+
+lines(daily_avg$DateEST, daily_avg$dailymean, # add mean as a line
+       type = "l", col = "red", lwd = 2)
+
+points(min(daily_avg$DateEST, na.rm = T), daily_avg$dailymean[which.min(daily_avg$DateEST)],
+       pch = 21, bg = "red", col = "black", cex = 2) # add first BestRx level
+
+points(max(daily_avg$DateEST, na.rm = T), daily_avg$dailymean[which.max(daily_avg$DateEST)],
+       pch = 21, bg = "red", col = "black", cex = 2) # add first BestRx level
 
 
-### ....................................................................................................
-### [E] Plot animated data with dynamic axes for multiple individuals ----
-### ....................................................................................................
+## label the axes
+### X-axis
+# mtext(expression(bold(paste(delta^{15}, "N (\u2030)"))), side = 2, line = 1.5, font = 2, las = 0, cex = 0.7)
+axis(1, at = c(min(all_i$DateEST, na.rm = T), max(all_i$DateEST, na.rm = T)),
+     labels = c(all_i$Date_local[which.min(all_i$DateEST)], all_i$Date_local[which.max(all_i$DateEST)]),
+     cex.axis = 0.9,
+     tck = -0.025,
+     las = 1)
+
+## add a legend
+legend("topright",
+       legend = c(expression(paste("BestRx level")),
+                  expression(paste("Daily mean level"))),
+       pch = c(21, 21),
+       pt.bg = c("blue", "red"),
+       col = c("black", "black"),
+       pt.lwd = c(1,1),
+       horiz = T,
+       cex = 1.1, bty = "n")
+
+## close and save plot window
+dev.off()
+}
 
 
 # END OF SCRIPT ----
@@ -242,3 +416,4 @@ title(main = expression(bold("Battery Voltage")))
 # check with WC where which diagnostic variable is taken from
 # implement diagnostics for Corrupted and uncorrupted plot, queued data summaries
 # check with Devon WC why transmit attempts has outliers in 264015
+# check with Devon regarding Temperature column in status file with readings up to 3000°C??
