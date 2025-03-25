@@ -473,12 +473,14 @@ contours <- rbind(spat_vector1, spat_)
 plot(contours, "names")
 
 v <- vect(system.file("ex/lux.shp", package="terra"))
+# END of script ----
 
-## TO DO base R and terra ####
+#TODO base R and terra
 # legend position ud surface and aesthethics
 # legend of ud contours
 # specific retro labels if you are degree minutes type-of-person
 # 95 and 50 % UDs as areas
 # legend for UD contours
 # north arrow and distance bar
-
+# remove 0% from UD scale bar
+# add a background raster using terra
