@@ -475,7 +475,8 @@ plot(contours, "names")
 v <- vect(system.file("ex/lux.shp", package="terra"))
 # END of script ----
 
-#TODO base R and terra
+#TODO-List
+## TODO1: ----
 # legend position ud surface and aesthethics
 # legend of ud contours
 # specific retro labels if you are degree minutes type-of-person
@@ -483,4 +484,4 @@ v <- vect(system.file("ex/lux.shp", package="terra"))
 # legend for UD contours
 # north arrow and distance bar
 # remove 0% from UD scale bar
-# add a background raster using terra
+# add a background raster using terra similar to animate movement script
