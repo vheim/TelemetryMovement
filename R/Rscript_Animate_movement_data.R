@@ -1,8 +1,8 @@
 # TOP OF CODE ----
 ### ====================================================================================================
-### Project:    NA
+### Project:    Large bodied hammerhead complex in the western North Atlantic
 ### Analysis:   Animate movement tracks of tagged animals
-### Script:     Rscript_Animate_movement_data.R
+### Script:     ~2025_NWA_hammerhead_complex/R/Rscript8_Animate_movement_data.R
 ### Author:     Vital Heim
 ### Version:    1.0
 ### ====================================================================================================
@@ -12,13 +12,10 @@
 ### such as animal tracking data.
 ### The script contains the following options to animate movement data
 ###
-### Section D: Animate movement of a single animal in a fixed extent - NEEDS UPDATE
-###            Tracks are printed in different colours based on a categorical variabel (e.g. season)
+### Section D: Animate movement of a single animal in a fixed extent
 ### Section E: Animate movement of multiple animals with a dynamic extent that follow each track over
 ###            time.
-###            Tracks are printed in different colours for each individual, whereas the symbols are
-###            are different for a categorical varaiable (e.g. season)
-###
+###            
 ### Please see TODO list at end of script for open issues.
 ### ....................................................................................................
 
@@ -30,10 +27,11 @@
 
 rm(list = ls())
 
-# A2: load necessary packages ----
+# A2: isntall and load necessary packages ----
 
 ## if first time
 # install.packages("tidyverse")
+# install.packages("magrittr")
 # install.packages("rnaturalearth") # if first time
 # install.packages("rnaturalearthdata") # if first time
 # install.packages("gganimate") # if first time
@@ -53,38 +51,82 @@ rm(list = ls())
 # remotes::install_github("SimonDedman/gbm.auto")
 # install.packages("gbm.auto")
 # install.packages("ggnewscale")
+# install.packages("beepr")
 
 ## load packages
-library("tidyverse")
-library("rnaturalearth")
-library("rnaturalearthdata")
-library("gganimate")
-library("gifski")
-library("ncdf4")
-library("stars")
-library("raster")
-library("terra")
-library("tidyterra")
-library("scales")
-library("ggOceanMapsData")
-library("ggOceanMaps")
-library("ggnewscale")
-library("sf")
-library("gbm.auto")
-library("ggnewscale") # if you have more than 1 scale per plot
+library(tidyverse)
+library(magrittr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(gganimate)
+library(gifski)
+library(ncdf4)
+library(stars)
+library(raster)
+library(terra)
+library(tidyterra)
+library(scales)
+# library(ggOceanMapsData)
+# library(ggOceanMaps")
+library(ggnewscale)
+library(sf)
+# library(gbm.auto)
+library(beepr)
 # library("ggimage") # NOT READY YET
 
-# A3: Specify dataloc and saveloc ----
+# A3: Specify needed functions ----
 
-# shapefileloc <- file.path("C:","Users","Vital Heim", "switchdrive","Science","Data","Shapefiles","World", "gshhg-shp-2.3.7","GSHHS_shp")
+# *A3.1: function to synchronise starting years ----
+shift_dates_custom_start <- function(x, id_col, date_col, start_year = 1980) {
+  x %>%
+    arrange({{ id_col }}, {{ date_col }}) %>%
+    group_by({{ id_col }}) %>%
+    mutate(
+      # Get the first observation date for each ID
+      first_date = first({{ date_col }}),
+      
+      # Calculate years, months, days, and time components
+      year_diff = year({{ date_col }}) - year(first_date),
+      
+      # Create new date preserving month, day, and time but starting from specified year
+      shifted_date = {{ date_col }} + years(start_year - year(first_date))
+    ) %>%
+    select(-first_date, -year_diff) %>%
+    ungroup()
+}
 
-dataloc <- file.path("//Sharktank","Science","Projects_current", "Andros_Hammerheads","Data_input","Animated_maps") # Adjust this
-saveloc <- file.path("//Sharktank","Science","Projects_current", "Andros_Hammerheads","Data_output","Animated_maps") # Adjust this
+# A4: Specify data and saveloc ----
 
-# A4: define needed functions, universal variables etc.----
+YOUR_IP <- "NA" # add your IP address, server name or similar if you connect via a shared drive
 
-## avoid error if timeout reached
+## Input data
+dataloc <- file.path("/",YOUR_IP, "Science","Projects_current", "2025_NWA_hammerhead_complex","Data_input", "Telemetry")
+bathyloc <- file.path("/",YOUR_IP, "Science", "Data_raw", "Bathymetry_maps_GMRT", "GMRTv4_3_0_20250120topo_wider_NWA.grd")
+misc_shapefileloc <- file.path("/",YOUR_IP, "Science", "Data_raw", "Shapefiles")
+
+## Output data
+saveloc <- file.path("/",YOUR_IP, "Science","Projects_current", "2025_NWA_hammerhead_complex","Data_output", "Telemetry", "Animations")
+
+# A5: Define universal variables (e.g. for plotting) ----
+
+# Plotting variables
+
+## bathymetry colors
+shallow <- "#D3E5E8"
+deep <- "#2B628B"
+depth <- c(deep, shallow)
+
+## speciescolours
+slewcol <- "#EDA904"
+smokcol <- "#70AB27"
+szygcol <- "#E26306"
+
+# A6: Define universal options, variables, etc. (e.g. for plotting) ----
+
 options(timeout = 3000) # manually increase time out threshold (needed when downloading basemap)
+options(scipen=999) # so that R doesn't act up for pit numbers  
+options(warn=1) #set this to two if you have warnings that need to be addressed as errors via traceback()
+options(error = function() beep(9))  # give warning noise if it fails
 
 ### ....................................................................................................
 ### [B] Data import ----
@@ -92,11 +134,42 @@ options(timeout = 3000) # manually increase time out threshold (needed when down
 
 # B1: Movement data ----
 
-## Detections
-DET_1 <- readRDS(file.path(dataloc, "Data_aniMotum_CRW_output_entire_track_rerouted_proj_WGS84_converted_with_coord_CIs_with_Argosfilter_data.rds"))
-DET_1$date <- as.POSIXct(DET_1$date,format="%Y-%m-%d %H:%M:%S",tz="UTC") ## very odd, need to define a
-DET_1$dateEST <- DET_1$date
-attr(DET_1$dateEST, "tzone") <- "US/Eastern"
+## movement data
+hammers <- readRDS(file = file.path(dataloc, "Animations", "Data_aniMotum_CRW_output_entire_track_rerouted_proj_WGS84_converted_with_coord_CIs_with_Argosfilter_data.rds")) |>
+  dplyr::rename(
+    shark = id
+    ) %>%
+  dplyr::mutate(
+    shark = as.character(shark)
+  )
+
+## metadata for length measurements
+meta <- read_csv(file.path(dataloc, "Data_AllSpecies_SPOT_tags_metadata.csv"))|>
+  dplyr::filter( # keep species of movement data
+    species %in% c("S.mokarran", "S.lewini","S.zygaena"),
+    group %in% c("Florida Keys", "Jupiter", "Jupiter, FL", "Marquesas", "South Carolina", "Tampa")
+  ) |>
+  dplyr::select( # keep needed columns only
+    ptt_id,
+    datetime_deployment_local,
+    stl,
+    sex,
+    species
+  ) |>
+  dplyr::mutate(
+    shark = as.character(ptt_id)
+    )
+
+## combine movement data with metadata
+hammers %<>% left_join(meta)  # , by = join_by(shark == id) # doesn't work naming columns, has gotten worse.
+
+## VERY IMPORTANT: The movement data needs to have time stamps in ascending order,
+## double check that this is true by ordering the dataframe
+hammers %<>%
+  dplyr::arrange(
+    shark,
+    date
+  )
 
 # B2: Basemap data and shapefiles ----
 
@@ -108,26 +181,13 @@ attr(DET_1$dateEST, "tzone") <- "US/Eastern"
 ### read in worldmap
 # world <- sf::st_read(dsn = paste0(shapefileloc,"/",res,"/GSHHS_", res, "_L1.shp"), layer = paste0("GSHHS_", res, "_L1"), quiet = TRUE) # read in worldmap
 
-## Option 2 - uses gbm.auto::basemap
-### if new dataset
-# basemap <- gbm.auto::gbm.basemap(
-#   bounds = c(min(DET_1$lon)-5, max(DET_1$lon)+5, min(DET_1$lat)-5, max(DET_1$lat)+5),
-#   # grids = DET_1, # if bounds unspecified, name your grids database here
-#   # gridslat = 6, # if bounds unspecified, specify which column in grids is latitude
-#   # gridslon = 3, # if bounds unspecified, specify which column in grids is longitude
-#   savedir = saveloc,
-#   savename = "Basemap_cropped" # shapefile save-name, no shp extension, default is "Crop_Map"
-# )
-
-### if you have already a cropped basemap file
-basemap <- sf::st_read(file.path(saveloc, "CroppedMap", "Basemap_cropped.shp"))
+## World shapefile - LQ
+world <- rnaturalearth::ne_countries(scale = 10, returnclass = "sf")
 
 # *B2.2: Bathymetry maps and other rasters ----
 
-### RASTER & STAR PACKAGE .....
-## if you need a raster
-bathyR <- raster::raster("//Sharktank/Science/Data_raw/Bathymetry_maps_GMRT/GMRTv4_3_0_20250120topo_wider_NWA.grd")
-## use rast() rather than raster(), rast() is from the terra package, and terra has more options and will replace raster
+bathyR <- raster::raster(bathyloc)
+## todo: use rast() rather than raster(), rast() is from the terra package, and terra has more options and will replace raster
 
 #SpatExtent : -84.3068857607634, -74.5949697079866, 22.996942201359, 35.7020417853476 (xmin, xmax, ymin, ymax)
 proj4string(bathyR) # from raster package
@@ -161,24 +221,19 @@ plot(bathyR)
 ## make a df needed for later plotting
 raster.df <- as.data.frame(bathyR, xy = T)
 
-### make a stars object
-bathystar <- stars::st_as_stars(bathyR)
-plot(bathystar, downsample = F)
-
-### TERRA PACKAGE.....
+## prep for TERRA PACKAGE.....
 bathyterra <- terra::rast(bathyR)
+plot(bathyterra)
 
 # *B2.2: Other shapefiles, e.g. EEZ or closure boundaries ----
 
 ### Bahamian EEZ
-bah_eez <- read_sf("//Sharktank/Science/Data_raw/Shapefiles/Bahamas/Bahamas_EEZ_boundary.shp")
-sf::st_crs(bah_eez)
-bah_eez <- sf::st_transform(bah_eez, st_crs = proj4string(bathyR)) # bring to same CRS as bathymetry raster
+# bah_eez <- read_sf("//Sharktank/Science/Data_raw/Shapefiles/Bahamas/Bahamas_EEZ_boundary.shp")
+# sf::st_crs(bah_eez)
+# bah_eez <- sf::st_transform(bah_eez, st_crs = proj4string(bathyR)) # bring to same CRS as bathymetry raster
 
-### State lines USA
-us_states <- read_sf("//Sharktank/Science/Data_raw/Shapefiles/USA/US_State_Boundaries/US_State_Boundaries.shp")
-sf::st_crs(us_states)
-us_states <- sf::st_transform(us_states, st_crs = proj4string(bathyR)) # bring to same CRS as bathymetry raster
+### US State boundaries
+usstates <- sf::st_read(dsn = file.path(misc_shapefileloc, "USA", "US_State_Boundaries", "US_State_Boundaries.shp"), quiet = TRUE) # read in worldmap
 
 ### Federal vs. state waters USA
 # NEEDS UPDATE
@@ -186,35 +241,28 @@ us_states <- sf::st_transform(us_states, st_crs = proj4string(bathyR)) # bring t
 ### US EEZ
 # NEEDS UPDATE
 
-
 ### ....................................................................................................
 ### [C] Data housekeeping and preparation ----
 ### ....................................................................................................
 
 # C1: housekeeping DET dataframe ----
 
-head(DET_1,2)
-
 ## filter the needed columns
-DET <- DET_1 %>%
-  dplyr::mutate( # define any additional variables that might be handy for plotting
-    month = format(dateEST, format = "%b", tz = "US/Eastern"), # get rid of year for later season variable definitions
-    season_bahamas = with(.,case_when(# summer/winter based on temperature by van Zinnicq Bergmann et al. 2022 ; summer =  1st Jun to 30th Nov, winter = 1st Dec to 31st May
-      month %in% c("May", "Jun", "Jul", "Aug", "Sep", "Oct") ~ "wet",
-      month %in% c("Nov", "Dec", "Jan", "Feb", "Mar", "Apr") ~ "dry",
-      TRUE ~ "seasonnonexistent")
-    )
-  ) %>%
+hammers_f <- hammers %>%
+  # dplyr::mutate( # define any additional variables that might be handy for plotting
+  #   month = format(dateEST, format = "%b", tz = "US/Eastern"), # get rid of year for later season variable definitions
+  #   season_bahamas = with(.,case_when(# summer/winter based on temperature by van Zinnicq Bergmann et al. 2022 ; summer =  1st Jun to 30th Nov, winter = 1st Dec to 31st May
+  #     month %in% c("May", "Jun", "Jul", "Aug", "Sep", "Oct") ~ "wet",
+  #     month %in% c("Nov", "Dec", "Jan", "Feb", "Mar", "Apr") ~ "dry",
+  #     TRUE ~ "seasonnonexistent")
+  #   )
+  # ) %>%
   dplyr::select(
-    id,
-    dateEST,
+    shark,
+    date,
     lon,
     lat,
-    season_bahamas
-  ) %>%
-  dplyr::rename(
-    time = dateEST,
-    season = season_bahamas
+    species
   )
 
 # C2: Process the data for animation ----
@@ -231,26 +279,51 @@ DET <- DET_1 %>%
 # For now and until a better solution is found, we used indexing of the timestamps to create
 # a df where each shark was "tagged" at the same time" and has the same time gap between each location estimate
 
-## Option 1: Indexing of locations
-det_anim <- DET %>%
+## We add an index nr. first
+det_anim <- hammers_f %>%
   group_by(
-    id
+    shark
   ) %>%
   dplyr::mutate(
     Index = row_number()
   )
 
-## Option 2: NOT YET IMPLEMENTED - TBC see to do's at end of script.
-#TBC
-
-## create complete dataset for plotting
-#df_all = left_join(ideal,df_ave)
-# df_all = df_ave
+## we also add a shifted data so that all sharks were tagged in the same year
+det_anim <- shift_dates_custom_start(det_anim, shark, date, 2020)
 
 # C3: add image as datapoint for later plotting - NOT YET IMPLEMENTED ----
 ## add an image to the dataframe for later plotting - NOT READY YET
 # df_all <- df_all %>%
   # dplyr::mutate(image = "C:/Users/Vital Heim/switchdrive/Science/Projects_and_Manuscripts/Andros_Hammerheads/InputData/hammerhead_shape.png")
+
+### ....................................................................................................
+### [D] Plot animated data with fixed plot window for individual animals or species ----
+### ....................................................................................................
+
+# D1: filter your dataframe by species if needed ----
+
+## What species
+sp.f <- "S.zygaena"
+
+## filter
+det_anim_spp <- det_anim %>%
+  dplyr::filter(
+    species %in% sp.f
+  )
+
+# D2: prepare parameters for static map ----
+
+## plot extent
+min(det_anim$lon);max(det_anim$lon)
+min(det_anim$lat);max(det_anim$lat)
+
+xmin <- ceiling(min(det_anim$lon)-1);xmin
+xmax <- ceiling(max(det_anim$lon)+1);xmax
+ymin <- floor(min(det_anim$lat)-1);ymin
+ymax <- ceiling(max(det_anim$lat)+1);ymax
+
+xlabs = seq(xmin, xmax, 5)
+ylabs = seq(ymin, ymax, 5)
 
 ### ....................................................................................................
 ### [D] Plot animated data with fixed plot window for individual animals ----
@@ -260,104 +333,164 @@ det_anim <- DET %>%
 
 # D1: static map ----
 
-## Define your color palettes and shape symbols
-summercol <- "#BDD149" # color for wet season
-wintercol <- "#579986" # color for dry season
-summershape <- # symbol for wet season
-wintershape <- # symbol for dry season
-
-## Define colours for raster
-shallow <- "#D3E5E8"
-deep <- "#2B628B"
-depth <- c(deep, shallow)
-
-# to deal with odd labels and plot margins
-min(df_all$lon);max(df_all$lon)
-min(df_all$lat);max(df_all$lat)
-
-xmin <- -76
-xmax <- -86
-ymin <- 23
-ymax <- 31
-
-xlabs = seq(-86, -76, 2)
-ylabs = seq(23, 31, 2)
+# det_anim_spp %>% ggplot(aes(x = lon, y = lat)) + geom_path()
 
 ## create plot with bathymetry/raster background
 #p = basemap(dt, bathymetry = T, expand.factor = 1.2) + # for bathymetry with ggOceanMaps package
-p <- ggplot() +
-
-  # raster bathymetry
-  geom_raster(data = raster.df , aes(x = x, y = y, fill = layer)) +
-  scale_fill_gradientn(colors = depth, guide = "none") + # guide = "none" prevents legend
-  # labs(x=NULL, y=NULL,
+st <- ggplot() +
+  
+  # bathymetry raster
+  ## stars package
+  # stars::geom_stars(data = stars::st_downsample(bathystar, 50) |> sf::st_transform(proj4string(bathyR)), inherit.aes = FALSE) + # choose your epsg code accordinlgy (here EPSG:3857 is for WGS 84 / Pseudo-Mercator -- Spherical Mercator, Google Maps, OpenStreetMap, Bing, ArcGIS, ESRI) - personally don't like it takes ages even with downsample
+  ## raster package
+  # ggplot2::geom_raster(data = raster.df , aes(x = x, y = y, fill = layer)) +
+  ## terra & tidyterra package - by far performs best
+  tidyterra::geom_spatraster(data = bathyterra) +
+  ## add a legend/gradient to your bathymetry raster
+  ggplot2::scale_fill_gradientn(colors = depth, guide = "none") +   # guide = "none" prevents legend
+  # # labs(x=NULL, y=NULL,
   #      fill = 'Depth [m]',
   #      color = 'Depth [m]')+
   # theme(panel.grid = element_blank(), legend.title = element_text(face = "bold")) +
-
-  #axis labels
-  scale_x_continuous(breaks = xlabs, labels = paste0(xlabs,'°W')) +
-  scale_y_continuous(breaks = ylabs, labels = paste0(ylabs,'°N')) +
-
+  
   #coord_quickmap() +
-
+  
   # start a new scale
   new_scale_fill() +
-
+  
+  # lines and points
+  geom_path(data = det_anim_spp, # comment this out if you want to animate a wake effect later
+            aes(x=lon,y=lat, group = shark),
+            col = ifelse(det_anim_spp$species == "S.lewini", slewcol,
+                         ifelse(det_anim_spp$species == "S.mokarran", smokcol,
+                                ifelse(det_anim_spp$species == "S.zygaena", szygcol, "black"))),
+            alpha = 1, linewidth = 1.5) +
+  
+  geom_point(data = det_anim_spp,
+             aes(x=lon,y=lat, group = shark),
+                 # group = seq_along(Index), # somehow needed if you want to keep data points, i.e. if you want keep_last = T in gganimate::animate()
+                 fill=ifelse(det_anim_spp$species == "S.lewini", slewcol,
+                             ifelse(det_anim_spp$species == "S.mokarran", smokcol,
+                                    ifelse(det_anim_spp$species == "S.zygaena", szygcol, "black"))),
+                 shape = 21,
+             alpha = 1, size = 4) +
+  
+  # add a symbol rather than a simple data point
+  # ggimage::geom_image(aes(image = image), size = 0.1)+ # NOT READY YET
+  
   # basemap
-  geom_sf(data = bg, fill = "gray95", color = "black", size = .5, inherit.aes = F)+
-
+  ggplot2::geom_sf(data = world, fill = "gray80", color = "black", size = 1, inherit.aes = F) +
+  
   # raster
   #geom_polygon(data = r, aes(x = long, y = lat)) +
-
+  
   # additional shapefiles
-  ## Bahamas EEZ
-  # bahamas eez shapefile
-  geom_sf(data = bah_eez, colour = "black", fill = NA, linewidth = .35) +
-
+  ggplot2::geom_sf(data = usstates, colour = "black", fill = NA, size = .25) +
+  
   # define plot limits
-  # coord_sf(xlim = c(xmin, xmax),
-  #          ylim = c(ymin, ymax),
-  #          expand = T)+
-
-  # lines and points
-  geom_path(data = df_all,
-            # aes(x=lon,y=lat,color=season),
-            aes(x=lon,y=lat, color = season),
-            alpha = .75, linewidth = 1.1)+
-  geom_point(data = df_all,
-             aes(x=lon,y=lat,
-                 # group = id,
-                 fill=season),
-             alpha = 1, shape=21, size = 3)+
-  # ggimage::geom_image(data = df_all, aes(image = image), size = 0.1)+ NOT READY YET
-
+  ggplot2::coord_sf(xlim = c(xmin, xmax),
+                    ylim = c(ymin+1, ymax),
+                    expand = T) +
+  
+  # plot axis labels
+  scale_x_continuous(labels = function(x) paste0(x, '\u00B0', "W")) +
+  scale_y_continuous(labels = function(x) paste0(x, '\u00B0', "N")) +
+  
   # formatting
   # scale_fill_viridis_c(option = "inferno")+
   # scale_color_viridis_c(option = "inferno")+
+  
   ## continous variables
   # scale_fill_gradientn(colors = seasoncol) +
   # scale_color_gradientn(colors = seasoncol) +
   # scale_size_continuous(range = c(0.1,10))+
+  
   ## categorical variables
-  scale_color_manual(values = c("winter" = wintercol, "summer" = summercol), guide = "none") +
-  scale_fill_manual(values = c("winter" = wintercol, "summer" = summercol)) +
-
-  # Add a legend
-  labs(x=NULL, y=NULL,
-       #color = "Season",
-       fill = 'Season'
-       )+
-  theme(panel.grid = element_blank(), legend.title = element_text(face = "bold"),
+  ### shape and legend for seasons
+  # scale_shape_manual(values = seasonsym,
+  #                    name= "Season", # sets legend name
+  #                    drop = F) +
+  ### fill colour for shark symbols
+  # scale_fill_manual(name = "Shark-ID",
+  #                   values = all_cols,
+  #                   drop = F,
+  #                   # guide = "none" # removes legend
+  #                   guide = guide_legend(override.aes = list(fill=all_cols, shape = 22, color = "black")) # use this if you use a wake effect in the animation or if you want a dot legend for individuals
+  # ) +
+  ### colour and legend of shark track
+  # scale_color_manual(name = "Shark-ID", # sets legend name
+  #                    values = all_cols,
+  #                    guide = "none", # use this if you don't want any tracks if you use a wake effect in the animation
+  #                    drop = F) +
+  
+  # Define your theme aesthethics
+  theme(panel.grid = element_blank(), #legend.title = element_text(face = "bold"),
         panel.border = element_rect(color = "black", fill = NA, linewidth = .75), # Add a black border around the plot
-        text = element_text(family = "serif"), # all text to Times New Roman look-a-like
-        plot.background = element_rect(fill = "white", color = NA),    # Set overall plot background to white
-        axis.text.x = element_text(size = 12), # change the font size of x.axis text
-        axis.text.y = element_text(size = 12), # change the font size of y.axis text
+        # panel.background = element_rect(fill = "#C1D4E1"), # as alternative as GMRT background takes ages to animate
+        # panel.background = element_rect(fill = "white"), # as alternative as GMRT background takes ages to animate
+        text = element_text(family = "serif", face = "plain"), # all text to Times New Roman look-a-like
+        plot.background = element_rect(fill = "white", color = "white"),    # Set overall plot background to white
+        axis.text.x = element_text(size = 15), # change the font size of x.axis text
+        axis.text.y = element_text(size = 15), # change the font size of y.axis text
+        axis.title.x = element_blank(), # removes x axis title (i.e. "lon")
+        axis.title.y = element_blank(), # removes y axis title (i.e. "lat")
         legend.title = element_text(size = 12, face = "bold"), # change the font size of the legend titles
-        legend.text = element_text(size = 10) # change the font size of legend text
-        )
-p
+        legend.text = element_text(size = 10),# change the font size of legend text
+        legend.background = element_blank(),
+        legend.key = element_blank(),
+        plot.title = element_text(face = "bold", size = 14)
+  ); st
+  
+  ## add a title
+  # ggtitle("Great hammerheads of Andros Island, The Bahamas") +   # add title and subtitle
+  
+  ## animate your map
+  # gganimate::transition_time(shifted_date) + # cannot be used with geom_path
+  # gganimate::transition_reveal(along = shifted_date, keep_last = F) 
+  # gganimate::shadow_mark(past = T, future = F)
+  # gganimate::shadow_wake(wake_length = 0.2, size = 1, colour = slewcol)  # only has meaning if you do not have a geom_path() element - does not work nicely view_follow()
+  # gganimate::view_follow() + # let the view follow the data in each step
+  # gganimate::view_step(pause_length = 3, # NOT READY YET
+  #                      step_length = 1,
+  #                      nsteps = 5) + # This view is a bit like view_follow() but will not match the data in each frame. Instead it will switch between being static and zoom to the range of the data.
+  # gganimate::view_zoom() #pause_length = 2,
+  #                      step_length = 1,
+  #                      nsteps = 7) + # in many ways equivalent to view_step() and view_step_manual() but instead of simply tweening the bounding box of each view it implement the smooth zoom and pan technique developed by Reach & North (2018).
+  
+  ## some more plot aesthethics
+  # ease_aes('cubic-in-out')  # 'cubic-in-out' for a smoother appearance
+  
+# D2: animated map
+  
+setwd(file.path(saveloc))
+
+## specify animation parameters
+frames <- pull(det_anim_spp %>%
+  count(shark) %>%
+  summarise(max_rows = max(n)))
+anim_dur <- 16 # tell me your desired animation duration
+fps <- ceiling(floor(frames/4)/anim_dur)
+  
+## animate
+anim = st +
+ gganimate::transition_reveal(along = shifted_date, keep_last = F)+
+    # view_follow() + # TODO: make coordinates and axes of plots dynamic so your animal can swim out of it and plot follow
+    ease_aes('linear')
+    # ggtitle("Storm - M - 315 cm sTL", subtitle = "Date: {frame_along}")
+  
+an <- gganimate::animate(anim, nframes = floor(frames/4), fps = fps, renderer = gifski_renderer(), width = 180, height = 200, units = "mm", res = 300)
+
+## save it
+anim_save(file.path(saveloc, paste0("Animated_tracks_",sp.f,"_with_bathymetry_",floor(frames/4),"_frames.gif")),
+            animation = last_animation(), path = NULL, dpi = 300) #, width = 20, height = 15, units = "cm")
+
+  
+# END OF CODE ----
+# FOR NOW - TO BE CONTINUED
+
+# TODO LIST ----
+# TODO 1: create animations with view_follow by individual within the same species, with diff. cols
+# TODO 2: re-implement code with symbols and colours based on grouping variables
 
 ## create plot with dark themed background
 #p = basemap(dt, bathymetry = T, expand.factor = 1.2) + # for bathymetry with ggOceanMaps package
@@ -413,7 +546,6 @@ anim = p +
 an <- gganimate::animate(anim, nframes = floor(frames/4), fps = fps, renderer = gifski_renderer(), width = 350, height = 200, units = "mm", res = 300)
 
 ## save it
-
 anim_save(paste0(saveloc, "/Animated_track_Smok_",ptt,"_", min(df_all$date), "_to_", max(df_all$date), "_with_bathymetry_",floor(frames/4),"_frames.gif"),
           animation = last_animation(), path = NULL, dpi = 300) #, width = 20, height = 15, units = "cm")
 
@@ -625,7 +757,7 @@ gganimate::animate(dy, nframes = floor(frames/4), fps = fps, renderer = gifski_r
 anim_save(paste0(saveloc, "/Animated_tracks_hammerheads_of_Andros_dynamic_axis_follow_",anim_dur,"_seconds_bathy.gif"),
           animation = last_animation(), path = NULL) #, dpi = 200) #, width = 20, height = 15, units = "cm")
 
-
+# END OF SCRIPT ----
 #### TODO LIST ####
 # TODO1: ----
 # update animation section to retain original date/time info even when animating multiple individuals
